@@ -3,7 +3,7 @@ from iconservice import *
 TAG = 'AUTHORIZATION'
 DEBUG = False
 MULTIPLIER = 1000000000000000000
-U_SECONDS_DAY = 86400000000 // 48  # Microseconds in a day.
+U_SECONDS_DAY = 86400000000  # Microseconds in a day.
 
 
 # An interface to get owner of the game's score
@@ -75,7 +75,6 @@ class Authorization(IconScoreBase):
     def on_update(self) -> None:
         super().on_update()
         self._day.set(self.now() // U_SECONDS_DAY)
-        self._game_developers_share.set(20)
 
     @external
     def untether(self) -> None:
