@@ -3,7 +3,7 @@ from iconservice import *
 TAG = 'AUTHORIZATION'
 DEBUG = False
 MULTIPLIER = 1000000000000000000
-U_SECONDS_DAY = 86400000000  # Microseconds in a day.
+U_SECONDS_DAY = 86400000000 // 48  # Microseconds in a day.
 
 
 # An interface to get owner of the game's score
@@ -344,12 +344,10 @@ class Authorization(IconScoreBase):
         # Check for revenue share wallet address
         revwallet = _metadata['revShareWalletAddress']
         try:
-            revWalletAddress = Address.from_string(revwallet)
-            if revWalletAddress.is_contract:
-                revert('Not a wallet address')
+            Address.from_string(revwallet)
         except BaseException as e:
-            Logger.debug(f'Failed. Exception: {e}', TAG)
-            revert('Invalid address')
+            revert(f'Invalid address'
+                   f'Error {e}')
 
     @external
     def accumulate_daily_wagers(self, game: Address, wager: int) -> None:
@@ -364,7 +362,7 @@ class Authorization(IconScoreBase):
         """
         if self.msg.sender != self._roulette_score.get():
             revert(f'Only roulette score can invoke this method.')
-        day = (self.now() // U_SECONDS_DAY)
+        day = self._day.get()
         self._wagers[day][game] += wager
         if (self._new_div_changing_time.get() is not None
             and self.now() >= self._new_div_changing_time.get()):
@@ -381,7 +379,7 @@ class Authorization(IconScoreBase):
         :rtype: dict
         """
         if day < 1:
-            day += (self.now() // U_SECONDS_DAY)
+            day += self._day.get()
         wagers = {}
         for game in self.get_approved_games():
             wagers[str(game)] = f'{self._wagers[day][game]}'
@@ -400,7 +398,7 @@ class Authorization(IconScoreBase):
         """
         if self.msg.sender != self._roulette_score.get():
             revert(f'Only roulette score can invoke this method.')
-        day = (self.now() // U_SECONDS_DAY)
+        day = self._day.get()
         self._payouts[day][game] += payout
         if (self._new_div_changing_time.get() is not None
             and self.now() >= self._new_div_changing_time.get()):
@@ -416,7 +414,7 @@ class Authorization(IconScoreBase):
         :rtype: int
         """
         if day < 1:
-            day += (self.now() // U_SECONDS_DAY)
+            day += self._day.get()
         payouts = {}
         for game in self.get_approved_games():
             payouts[str(game)] = f'{self._payouts[day][game]}'
@@ -530,7 +528,8 @@ class Authorization(IconScoreBase):
         if self.msg.sender != self._roulette_score.get():
             revert("This method can only be called by Roulette score")
         positive_excess: int = 0
-        day = (self.now() // U_SECONDS_DAY)
+        day = self._day.get() + 1
+        self._day.set(day)
         for game in self.get_approved_games():
             game_excess = self._todays_games_excess[game]
             self._games_excess_history[day - 1][game] = game_excess
@@ -551,7 +550,7 @@ class Authorization(IconScoreBase):
         if day == 0:
             return self.get_todays_games_excess()
         if day < 0:
-            day += (self.now() // U_SECONDS_DAY)
+            day += self._day.get()
         games_excess = {}
         for game in self.get_approved_games():
             games_excess[str(game)] = f'{self._games_excess_history[day][game]}'
@@ -578,6 +577,21 @@ class Authorization(IconScoreBase):
         for game in self.get_approved_games():
             games_excess[str(game)] = f'{self._todays_games_excess[game]}'
         return games_excess
+
+    @external
+    def update_metadata(self, _gamedata: str) -> None:
+        """
+        Update the metadata of proposals. Only owner can change the proposal data.
+        :return:
+        """
+        if self.msg.sender != self.owner:
+            revert("Only owner can call this method")
+        metadata = json_loads(_gamedata)
+        self._check_game_metadata(metadata)
+        score_at_address = self.create_interface_score(Address.from_string(metadata['scoreAddress']),
+                                                       ScoreOwnerInterface)
+        self._owner_data[Address.from_string(metadata['scoreAddress'])] = score_at_address.get_score_owner()
+        self._proposal_data[Address.from_string(metadata['scoreAddress'])] = _gamedata
 
     @payable
     def fallback(self):
