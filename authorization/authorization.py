@@ -37,6 +37,10 @@ class Authorization(IconScoreBase):
     # dividends paid according to this excess
     _GAMES_EXCESS_HISTORY = "games_excess_history"
 
+    _APPLY_WATCH_DOG_METHOD = "apply_watch_dog_method"
+    _MAXIMUM_PAYOUTS = "maximum_payouts"
+    _MAXIMUM_LOSS = "maximum_loss"
+
     def __init__(self, db: IconScoreDatabase) -> None:
         super().__init__(db)
         if DEBUG is True:
@@ -60,12 +64,20 @@ class Authorization(IconScoreBase):
         self._new_div_changing_time = VarDB(self._NEW_DIV_CHANGING_TIME, db, value_type=int)
         self._games_excess_history = DictDB(self._GAMES_EXCESS_HISTORY, db, value_type=int, depth=2)
 
+        self._apply_watch_dog_method = VarDB(self._APPLY_WATCH_DOG_METHOD, db, value_type=bool)
+        self._maximum_payouts = DictDB(self._MAXIMUM_PAYOUTS, db, value_type=int)
+        self._maximum_loss = VarDB(self._MAXIMUM_LOSS, db, value_type=int)
+
     @eventlog(indexed=2)
     def FundTransfer(self, recipient: Address, amount: int, note: str):
         pass
 
     @eventlog(indexed=2)
     def ProposalSubmitted(self, sender: Address, scoreAddress: Address):
+        pass
+
+    @eventlog(indexed=1)
+    def GameSuspended(self, scoreAddress: Address, note: str):
         pass
 
     def on_install(self) -> None:
@@ -271,6 +283,9 @@ class Authorization(IconScoreBase):
         self._status_data[Address.from_string(metadata['scoreAddress'])] = 'waiting'
         self._proposal_data[Address.from_string(metadata['scoreAddress'])] = _gamedata
 
+        if self._apply_watch_dog_method.get():
+            self._maximum_payouts[Address.from_string(metadata['scoreAddress'])] = metadata['maxPayout']
+
     @external
     def set_game_status(self, _status: str, _scoreAddress: Address) -> None:
         """
@@ -321,6 +336,13 @@ class Authorization(IconScoreBase):
         for field in self.METADATA_FIELDS:
             if field not in _metadata:
                 revert(f'There is no {field} for the game')
+
+        if self._apply_watch_dog_method.get():
+            if 'maxPayout' not in _metadata:
+                revert(f'There is no maxPayout for the game')
+
+            if _metadata['maxPayout'] < 100000000000000000:  # 0.1 ICX = 10^18 * 0.1
+                revert(f"{_metadata['maxPayout']} is less than 0.1 ICX")
 
         # Check if name is empty
         if _metadata['name'] == '':
@@ -388,7 +410,7 @@ class Authorization(IconScoreBase):
         return wagers
 
     @external
-    def accumulate_daily_payouts(self, game: Address, payout: int) -> None:
+    def accumulate_daily_payouts(self, game: Address, payout: int) -> bool:
         """
         Accumulates daily payouts of the game. Updates the excess of the game.
         Only roulette score can call this function.
@@ -401,10 +423,26 @@ class Authorization(IconScoreBase):
         if self.msg.sender != self._roulette_score.get():
             revert(f'Only roulette score can invoke this method.')
         day = (self.now() // U_SECONDS_DAY)
+
+        if self._apply_watch_dog_method.get():
+            try:
+                if payout > self._maximum_payouts[game]:
+                    revert(f'Preventing Overpayment. Requested payout: {payout}. MaxPayout for this game: '
+                           f'{self._maximum_payouts[game]}. {TAG}')
+
+                if self._payouts[day][game] - self._wagers[day][game] >= self._maximum_loss.get():
+                    revert(f'Limit loss. MaxLoss: {self._maximum_loss.get()}. Loss Incurred if payout: '
+                           f'{self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
+            except BaseException as e:
+                self._status_data[game] = 'gameSuspended'
+                self.GameSuspended(game, str(e))
+                return False
+
         self._payouts[day][game] += payout
         if (self._new_div_changing_time.get() is not None
             and self.now() >= self._new_div_changing_time.get()):
             self._todays_games_excess[game] -= payout
+        return True
 
     @external(readonly=True)
     def get_daily_payouts(self, day: int = 0) -> dict:
@@ -582,3 +620,56 @@ class Authorization(IconScoreBase):
     @payable
     def fallback(self):
         pass
+
+    @external
+    def set_maximum_loss(self, maxLoss: int) -> None:
+        Logger.debug(f'Setting maxLoss of {maxLoss}')
+        if maxLoss < 10 ** 17:  # 0.1 ICX = 10^18 * 0.1
+            revert(f'maxLoss is set to a value less than 0.1 ICX')
+        if self.msg.sender not in self.get_admin():
+            revert('Sender not an admin')
+        self._maximum_loss.set(maxLoss)
+
+    @external(readonly=True)
+    def get_maximum_loss(self) -> int:
+        return self._maximum_loss.get()
+
+    @external
+    def set_maximum_payout(self, game: Address, maxPayout: int) -> None:
+        if maxPayout < 100000000000000000:  # 0.1 ICX = 10^18 * 0.1
+            revert(f'{maxPayout} is less than 0.1 ICX')
+        if game not in self._proposal_list:
+            revert('Game has not been submitted.')
+        if self.msg.sender not in self.get_admin():
+            revert('Sender not an admin')
+
+        self._maximum_payouts[game] = maxPayout
+
+    @external(readonly=True)
+    def get_maximum_payout(self, game: Address) -> int:
+        if game not in self._proposal_list:
+            revert('Game has not been submitted.')
+        return self._maximum_payouts[game]
+
+    @external
+    def toggle_apply_watch_dog_method(self):
+        if self.msg.sender not in self.get_admin():
+            revert('Sender not an admin')
+        old_watch_dog_status = self._apply_watch_dog_method.get()
+
+        if not old_watch_dog_status:
+            # All approved games must have minimum_payouts set before applying watch dog methods.
+            for scoreAddress in self._proposal_list:
+                if self._status_data[scoreAddress] == "gameApproved":
+                    if self._maximum_payouts[scoreAddress] < 100000000000000000:
+                        revert(f'maxPayout of {scoreAddress} is less than 0.1 ICX')
+
+            if self._maximum_loss.get() < 100000000000000000:
+                revert(f'maxLoss is set to a value less than 0.1 ICX')
+
+        self._apply_watch_dog_method.set(
+            not self._apply_watch_dog_method.get())
+
+    @external(readonly=True)
+    def get_apply_watch_dog_method(self) -> bool:
+        return self._apply_watch_dog_method.get()
