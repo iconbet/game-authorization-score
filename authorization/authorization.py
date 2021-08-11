@@ -430,7 +430,7 @@ class Authorization(IconScoreBase):
                     revert(f'Preventing Overpayment. Requested payout: {payout}. MaxPayout for this game: '
                            f'{self._maximum_payouts[game]}. {TAG}')
 
-                if self._payouts[day][game] - self._wagers[day][game] >= self._maximum_loss.get():
+                if self._payouts[day][game] + payout - self._wagers[day][game] >= self._maximum_loss.get():
                     revert(f'Limit loss. MaxLoss: {self._maximum_loss.get()}. Loss Incurred if payout: '
                            f'{self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
             except BaseException as e:
