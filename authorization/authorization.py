@@ -428,17 +428,16 @@ class Authorization(IconScoreBase):
         day = (self.now() // U_SECONDS_DAY)
 
         if self._apply_watch_dog_method.get():
-            try:
-                if payout > self._maximum_payouts[game]:
-                    revert(f'Preventing Overpayment. Requested payout: {payout}. MaxPayout for this game: '
-                           f'{self._maximum_payouts[game]}. {TAG}')
-
-                if self._payouts[day][game] + payout - self._wagers[day][game] >= self._maximum_loss.get():
-                    revert(f'Limit loss. MaxLoss: {self._maximum_loss.get()}. Loss Incurred if payout: '
-                           f'{self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
-            except BaseException as e:
+            if payout > self._maximum_payouts[game]:
                 self._status_data[game] = 'gameSuspended'
-                self.GameSuspended(game, str(e))
+                self.GameSuspended(game, f'To prevent overpayment. Requested payout: {payout}. '
+                                         f'MaxPayout: {self._maximum_payouts[game]}. {TAG}')
+                return False
+
+            if self._payouts[day][game] + payout - self._wagers[day][game] >= self._maximum_loss.get():
+                self._status_data[game] = 'gameSuspended'
+                self.GameSuspended(game, f'To limit loss. MaxLoss: {self._maximum_loss.get()}. '
+                                         f'Loss Incurred if payout: {self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
                 return False
 
         self._payouts[day][game] += payout
