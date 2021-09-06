@@ -372,8 +372,7 @@ class Authorization(IconScoreBase):
             if revWalletAddress.is_contract:
                 revert('Not a wallet address')
         except Exception:
-            Logger.debug(f'Failed.', TAG)
-            revert('Invalid address')
+            revert('Invalid address while getting game metadata.')
 
     @external
     def accumulate_daily_wagers(self, game: Address, wager: int) -> None:
