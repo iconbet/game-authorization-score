@@ -269,8 +269,7 @@ class Authorization(IconScoreBase):
             revert(f'50 ICX is required for submitting game proposal')
         metadata = json_loads(_gamedata)
         self._check_game_metadata(metadata)
-        scoreAddress = metadata['scoreAddress']
-        game_address = Address.from_string(scoreAddress)
+        game_address = Address.from_string(metadata['scoreAddress'])
         score_at_address = self.create_interface_score(game_address, ScoreOwnerInterface)
 
         if self.msg.sender != score_at_address.get_score_owner():
@@ -302,13 +301,13 @@ class Authorization(IconScoreBase):
             revert('Sender not an admin')
         if _status not in self.STATUS_TYPE:
             revert('Invalid status')
-        gameAddress = self._status_data[_scoreAddress]
-        if _status == 'gameRejected' and gameAddress != 'gameReady':
-            revert(f'This game cannot be rejected from state {gameAddress}')
-        if _status == 'gameApproved' and not (gameAddress == 'gameReady'
-                                              or gameAddress == 'gameSuspended'):
-            revert(f'This game cannot be approved from state {gameAddress}')
-        if _status == 'gameSuspended' and gameAddress != 'gameApproved':
+        gameStatus = self._status_data[_scoreAddress]
+        if _status == 'gameRejected' and gameStatus != 'gameReady':
+            revert(f'This game cannot be rejected from state {gameStatus}')
+        if _status == 'gameApproved' and not (gameStatus == 'gameReady'
+                                              or gameStatus == 'gameSuspended'):
+            revert(f'This game cannot be approved from state {gameStatus}')
+        if _status == 'gameSuspended' and gameStatus != 'gameApproved':
             revert('Only approved games may be suspended.')
         if _status == 'gameDeleted' and gameAddress != 'gameSuspended':
             revert('Only suspended games may be deleted.')
