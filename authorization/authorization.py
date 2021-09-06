@@ -309,7 +309,7 @@ class Authorization(IconScoreBase):
             revert(f'This game cannot be approved from state {gameStatus}')
         if _status == 'gameSuspended' and gameStatus != 'gameApproved':
             revert('Only approved games may be suspended.')
-        if _status == 'gameDeleted' and gameAddress != 'gameSuspended':
+        if _status == 'gameDeleted' and gameStatus != 'gameSuspended':
             revert('Only suspended games may be deleted.')
 
         self._status_data[_scoreAddress] = _status
