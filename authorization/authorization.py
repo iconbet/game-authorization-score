@@ -269,22 +269,23 @@ class Authorization(IconScoreBase):
             revert(f'50 ICX is required for submitting game proposal')
         metadata = json_loads(_gamedata)
         self._check_game_metadata(metadata)
-        score_at_address = self.create_interface_score(Address.from_string(metadata['scoreAddress']),
-                                                       ScoreOwnerInterface)
+        game_address = Address.from_string(metadata['scoreAddress'])
+        score_at_address = self.create_interface_score(game_address, ScoreOwnerInterface)
 
         if self.msg.sender != score_at_address.get_score_owner():
             revert('Owner not matched')
-        self.ProposalSubmitted(self.msg.sender, Address.from_string(metadata['scoreAddress']))
-        if Address.from_string(metadata['scoreAddress']) in self._proposal_list:
-            revert(f'Already listed scoreAddress in the proposal list.')
-        self._proposal_list.put(Address.from_string(metadata['scoreAddress']))
-        self._owner_data[Address.from_string(metadata['scoreAddress'])] = self.msg.sender
 
-        self._status_data[Address.from_string(metadata['scoreAddress'])] = 'waiting'
-        self._proposal_data[Address.from_string(metadata['scoreAddress'])] = _gamedata
+        self.ProposalSubmitted(self.msg.sender, game_address)
+        if game_address in self._proposal_list:
+            revert(f'Already listed scoreAddress in the proposal list.')
+        self._proposal_list.put(game_address)
+        self._owner_data[game_address] = self.msg.sender
+
+        self._status_data[game_address] = 'waiting'
+        self._proposal_data[game_address] = _gamedata
 
         if self._apply_watch_dog_method.get():
-            self._maximum_payouts[Address.from_string(metadata['scoreAddress'])] = metadata['maxPayout']
+            self._maximum_payouts[game_address] = metadata['maxPayout']
 
     @external
     def set_game_status(self, _status: str, _scoreAddress: Address) -> None:
@@ -300,14 +301,15 @@ class Authorization(IconScoreBase):
             revert('Sender not an admin')
         if _status not in self.STATUS_TYPE:
             revert('Invalid status')
-        if _status == 'gameRejected' and self._status_data[_scoreAddress] != 'gameReady':
-            revert(f'This game cannot be rejected from state {self._status_data[_scoreAddress]}')
-        if _status == 'gameApproved' and not (self._status_data[_scoreAddress] == 'gameReady'
-                                              or self._status_data[_scoreAddress] == 'gameSuspended'):
-            revert(f'This game cannot be approved from state {self._status_data[_scoreAddress]}')
-        if _status == 'gameSuspended' and self._status_data[_scoreAddress] != 'gameApproved':
+        gameStatus = self._status_data[_scoreAddress]
+        if _status == 'gameRejected' and gameStatus != 'gameReady':
+            revert(f'This game cannot be rejected from state {gameStatus}')
+        if _status == 'gameApproved' and not (gameStatus == 'gameReady'
+                                              or gameStatus == 'gameSuspended'):
+            revert(f'This game cannot be approved from state {gameStatus}')
+        if _status == 'gameSuspended' and gameStatus != 'gameApproved':
             revert('Only approved games may be suspended.')
-        if _status == 'gameDeleted' and self._status_data[_scoreAddress] != 'gameSuspended':
+        if _status == 'gameDeleted' and gameStatus != 'gameSuspended':
             revert('Only suspended games may be deleted.')
 
         self._status_data[_scoreAddress] = _status
@@ -369,9 +371,8 @@ class Authorization(IconScoreBase):
             revWalletAddress = Address.from_string(revwallet)
             if revWalletAddress.is_contract:
                 revert('Not a wallet address')
-        except BaseException as e:
-            Logger.debug(f'Failed. Exception: {e}', TAG)
-            revert('Invalid address')
+        except Exception:
+            revert('Invalid address while getting game metadata.')
 
     @external
     def accumulate_daily_wagers(self, game: Address, wager: int) -> None:
@@ -425,17 +426,16 @@ class Authorization(IconScoreBase):
         day = (self.now() // U_SECONDS_DAY)
 
         if self._apply_watch_dog_method.get():
-            try:
-                if payout > self._maximum_payouts[game]:
-                    revert(f'Preventing Overpayment. Requested payout: {payout}. MaxPayout for this game: '
-                           f'{self._maximum_payouts[game]}. {TAG}')
-
-                if self._payouts[day][game] + payout - self._wagers[day][game] >= self._maximum_loss.get():
-                    revert(f'Limit loss. MaxLoss: {self._maximum_loss.get()}. Loss Incurred if payout: '
-                           f'{self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
-            except BaseException as e:
+            if payout > self._maximum_payouts[game]:
                 self._status_data[game] = 'gameSuspended'
-                self.GameSuspended(game, str(e))
+                self.GameSuspended(game, f'To prevent overpayment. Requested payout: {payout}. '
+                                         f'MaxPayout: {self._maximum_payouts[game]}. {TAG}')
+                return False
+
+            if self._payouts[day][game] + payout - self._wagers[day][game] >= self._maximum_loss.get():
+                self._status_data[game] = 'gameSuspended'
+                self.GameSuspended(game, f'To limit loss. MaxLoss: {self._maximum_loss.get()}. '
+                                         f'Loss Incurred if payout: {self._payouts[day][game] + payout - self._wagers[day][game]}, {TAG}')
                 return False
 
         self._payouts[day][game] += payout
