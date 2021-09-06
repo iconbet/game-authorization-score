@@ -372,8 +372,8 @@ class Authorization(IconScoreBase):
             revWalletAddress = Address.from_string(revwallet)
             if revWalletAddress.is_contract:
                 revert('Not a wallet address')
-        except BaseException as e:
-            Logger.debug(f'Failed. Exception: {e}', TAG)
+        except Exception:
+            Logger.debug(f'Failed.', TAG)
             revert('Invalid address')
 
     @external
