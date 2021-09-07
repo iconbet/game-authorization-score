@@ -86,8 +86,6 @@ class Authorization(IconScoreBase):
 
     def on_update(self) -> None:
         super().on_update()
-        self._day.set(self.now() // U_SECONDS_DAY)
-        self._game_developers_share.set(20)
 
     @external
     def untether(self) -> None:
@@ -390,7 +388,7 @@ class Authorization(IconScoreBase):
         day = (self.now() // U_SECONDS_DAY)
         self._wagers[day][game] += wager
         if (self._new_div_changing_time.get() is not None
-            and self.now() >= self._new_div_changing_time.get()):
+                and self.now() >= self._new_div_changing_time.get()):
             self._todays_games_excess[game] += wager
 
     @external(readonly=True)
@@ -440,7 +438,7 @@ class Authorization(IconScoreBase):
 
         self._payouts[day][game] += payout
         if (self._new_div_changing_time.get() is not None
-            and self.now() >= self._new_div_changing_time.get()):
+                and self.now() >= self._new_div_changing_time.get()):
             self._todays_games_excess[game] -= payout
         return True
 
